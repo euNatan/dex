@@ -24,7 +24,8 @@ const router = createRouter({
     { path: '/login', name: 'login', component: LoginPage, meta: { title: 'Entrar', public: true } },
     { path: '/auth/callback', name: 'auth-callback', component: AuthCallbackPage, meta: { title: 'Auth', public: true } },
   ],
-  scrollBehavior() {
+  scrollBehavior(to, from) {
+    if (to.name === 'set-detail' && from.name === 'card-detail') return false
     return { top: 0 }
   },
 })

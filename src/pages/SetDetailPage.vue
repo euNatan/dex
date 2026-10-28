@@ -1,19 +1,22 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import AddSheet from '../components/AddSheet.vue'
 import SetCardTile from '../components/SetCardTile.vue'
-import { useCollectionStore } from '../stores/collection'
 import { brDate, brPrice, compactNumber } from '../lib/format'
+import { loadSetViewState, restoreSetScroll, saveSetScroll, saveSetViewState } from '../lib/setViewState'
+import { useCollectionStore } from '../stores/collection'
 
 const route = useRoute()
 const router = useRouter()
 const store = useCollectionStore()
 const { setSummaries, cards, catalogSets, defaultConditionId } = storeToRefs(store)
 
-const filter = ref('all')
-const registerMode = ref(true)
+const viewKey = computed(() => `${route.params.code || ''}:${route.query.id || ''}`)
+const initialView = loadSetViewState(viewKey.value)
+const filter = ref(initialView.filter)
+const registerMode = ref(initialView.registerMode)
 const catalog = ref([])
 const category = ref(null)
 const loadingSet = ref(false)
@@ -81,6 +84,34 @@ const title = computed(() => category.value?.name || ownedSet.value?.name || cat
 const series = computed(() => category.value?.series || ownedSet.value?.series || catalogHit.value?.series || '')
 const releaseDate = computed(() => category.value?.release_date || ownedSet.value?.release_date || catalogHit.value?.release_date || '')
 
+watch(viewKey, (key) => {
+  const saved = loadSetViewState(key)
+  filter.value = saved.filter
+  registerMode.value = saved.registerMode
+})
+
+watch([filter, registerMode, viewKey], () => {
+  saveSetViewState(viewKey.value, {
+    filter: filter.value,
+    registerMode: registerMode.value,
+  })
+})
+
+function applyCatalog(data) {
+  category.value = data?.category || null
+  catalog.value = (data?.cards || []).map((product) => ({
+    ...product,
+    collection: product.collection?.length
+      ? product.collection
+      : [{ id: data?.category?.id, name: data?.category?.name, code: data?.category?.code }],
+  }))
+}
+
+async function restoreViewScroll() {
+  await nextTick()
+  restoreSetScroll(viewKey.value)
+}
+
 watch(categoryId, async (id) => {
   if (!id) {
     if (!catalogSets.value.length) {
@@ -93,22 +124,23 @@ watch(categoryId, async (id) => {
     return
   }
 
+  const cached = store.peekSetCards(id)
+  if (cached) {
+    applyCatalog(cached)
+    await restoreViewScroll()
+    return
+  }
+
   loadingSet.value = true
   loadError.value = ''
   try {
-    const data = await store.getSetCards(id)
-    category.value = data.category
-    catalog.value = (data.cards || []).map((product) => ({
-      ...product,
-      collection: product.collection?.length
-        ? product.collection
-        : [{ id: data.category?.id, name: data.category?.name, code: data.category?.code }],
-    }))
+    applyCatalog(await store.getSetCards(id))
   } catch (err) {
     loadError.value = err?.message || 'Não foi possível carregar as cartas do set'
     catalog.value = []
   } finally {
     loadingSet.value = false
+    await restoreViewScroll()
   }
 }, { immediate: true })
 
@@ -146,6 +178,10 @@ async function onSelect(row) {
               ? { ...item, id: result.product_id, source: 'liga' }
               : item
           ))
+          store.rememberSetCards(categoryId.value, {
+            category: category.value,
+            cards: catalog.value,
+          })
         }
       }
     } catch (err) {
@@ -157,12 +193,21 @@ async function onSelect(row) {
   }
 
   if (row.owned && row.entries[0]) {
+    saveSetScroll(viewKey.value)
     router.push({ name: 'card-detail', params: { id: row.entries[0].id } })
     return
   }
 
   selectedProduct.value = withCollection(row.product)
 }
+
+onUnmounted(() => {
+  saveSetScroll(viewKey.value)
+  saveSetViewState(viewKey.value, {
+    filter: filter.value,
+    registerMode: registerMode.value,
+  })
+})
 </script>
 
 <template>

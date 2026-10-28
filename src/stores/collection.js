@@ -12,6 +12,7 @@ export const useCollectionStore = defineStore('collection', () => {
   const grouped = ref({})
   const conditions = ref([])
   const catalogSets = ref([])
+  const setCardsById = ref({})
   const toast = ref('')
   const loading = ref(false)
   const error = ref('')
@@ -98,8 +99,27 @@ export const useCollectionStore = defineStore('collection', () => {
     return catalogSets.value
   }
 
-  async function getSetCards(categoryId) {
-    return repo.getSetCards(categoryId)
+  function peekSetCards(categoryId) {
+    return setCardsById.value[String(categoryId)] || null
+  }
+
+  function rememberSetCards(categoryId, data) {
+    if (!categoryId || !data) return
+    setCardsById.value = {
+      ...setCardsById.value,
+      [String(categoryId)]: data,
+    }
+  }
+
+  async function getSetCards(categoryId, { force = false } = {}) {
+    if (!force) {
+      const cached = peekSetCards(categoryId)
+      if (cached) return cached
+    }
+
+    const data = await repo.getSetCards(categoryId)
+    rememberSetCards(categoryId, data)
+    return data
   }
 
   async function getPriceStats(productId, filter = '1m') {
@@ -183,6 +203,8 @@ export const useCollectionStore = defineStore('collection', () => {
     searchProducts,
     loadCatalogSets,
     getSetCards,
+    peekSetCards,
+    rememberSetCards,
     getPriceStats,
   }
 })
